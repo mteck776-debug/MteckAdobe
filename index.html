@@ -299,7 +299,7 @@ const FONT = {
   cour: { css: '"Courier New", Courier, monospace', k: 0.8665, std: ['Courier', 'CourierBold', 'CourierOblique', 'CourierBoldOblique'] }
 };
 const HINTS = {
-  select: 'Click an item to move or resize it. Double-click text to retype it. Delete removes it.',
+  select: 'Double-click any text on the page to retype it. Click an item you added to move or resize it; Delete removes it.',
   edit: 'Click any line of text on the page to retype it. The replacement uses a standard font, so it can look slightly different.',
   text: 'Click where you want to type.',
   highlight: 'Drag across what you want to highlight.',
@@ -660,6 +660,12 @@ function startEdit(v, a, isNew) {
     if (v.el.isConnected) renderOverlay(v); syncProps();
   }, { once: true });
 }
+function editItem(v, it) {
+  const p = v.page, cover = { x: it.x - 1, y: it.base - it.size * 0.92, w: it.w + 2, h: it.size * 1.24 }, col = sampleColors(v, cover);
+  pushUndo(); const size = Math.round(it.size * 10) / 10;
+  const a = { id: uid('a'), type: 'text', x: it.x, y: it.base - FONT[it.font].k * size, text: it.str, size, color: col.fg, font: it.font, bold: it.bold, italic: it.italic, cover: Object.assign(cover, { color: col.bg }) };
+  p.annots.push(a); setTool('select'); requestAnimationFrame(() => startEdit(v, a, true));
+}
 let drag = null;
 $('#pages').addEventListener('pointerdown', e => {
   if (e.button !== 0) return;
@@ -672,17 +678,13 @@ $('#pages').addEventListener('pointerdown', e => {
     let a = null;
     if (hd && S.selA) a = p.annots.find(x => x.id === S.selA.aid); else if (ae) a = p.annots.find(x => x.id === ae.dataset.aid);
     if (!a) { if (S.selA) selectAnnot(v, null); return; }
-    if (!hd) selectAnnot(v, a);
+    if (!hd && !(S.selA && S.selA.aid === a.id)) selectAnnot(v, a);
     drag = { kind: hd ? 'resize' : 'move', h: hd && hd.dataset.h, v, a, start: pt, orig: JSON.parse(JSON.stringify(a)), before: snap(), moved: false };
     e.preventDefault(); return;
   }
   e.preventDefault();
   if (t === 'edit') {
-    const hit = e.target.closest('.thit'); if (!hit) return; const it = textCache[p.src + ':' + p.idx][+hit.dataset.ti];
-    const cover = { x: it.x - 1, y: it.base - it.size * 0.92, w: it.w + 2, h: it.size * 1.24 }, col = sampleColors(v, cover);
-    pushUndo(); const size = Math.round(it.size * 10) / 10;
-    const a = { id: uid('a'), type: 'text', x: it.x, y: it.base - FONT[it.font].k * size, text: it.str, size, color: col.fg, font: it.font, bold: it.bold, italic: it.italic, cover: Object.assign(cover, { color: col.bg }) };
-    p.annots.push(a); setTool('select'); requestAnimationFrame(() => startEdit(v, a, true)); return;
+    const hit = e.target.closest('.thit'); if (!hit) return; editItem(v, textCache[p.src + ':' + p.idx][+hit.dataset.ti]); return;
   }
   if (t === 'text') {
     pushUndo(); const d = D.text, a = { id: uid('a'), type: 'text', x: pt.x, y: pt.y - d.size * 0.6, text: '', size: d.size, color: d.color, font: d.font, bold: d.bold, italic: d.italic };
@@ -734,8 +736,17 @@ window.addEventListener('pointerup', () => {
   drag = null;
 });
 $('#pages').addEventListener('dblclick', e => {
-  if (S.tool !== 'select') return; const ae = e.target.closest('.a-text'); if (!ae || ae.isContentEditable) return;
-  const v = views.find(x => x.el === e.target.closest('.pg')), a = v.page.annots.find(x => x.id === ae.dataset.aid); if (a) startEdit(v, a, false);
+  if (S.tool !== 'select' || e.target.isContentEditable || e.target.closest('.ff')) return;
+  const v = views.find(x => x.el === e.target.closest('.pg')); if (!v) return;
+  const ae = e.target.closest('.a-text');
+  if (ae) { const a = v.page.annots.find(x => x.id === ae.dataset.aid); if (a) startEdit(v, a, false); return; }
+  if (e.target.closest('[data-aid]') || !v.page.src) return;
+  const pt = toPage(v, e);
+  textItems(v.page).then(items => {
+    if (S.tool !== 'select' || v.editing || !v.el.isConnected) return;
+    const it = items.find(i => pt.x >= i.x - 2 && pt.x <= i.x + i.w + 2 && pt.y >= i.base - i.size * 0.95 && pt.y <= i.base + i.size * 0.3);
+    if (it) editItem(v, it);
+  }).catch(() => {});
 });
 function deleteSelAnnot() { if (!S.selA) return; const v = viewById(S.selA.pid); if (!v) return; pushUndo(); v.page.annots = v.page.annots.filter(x => x.id !== S.selA.aid); S.selA = null; renderOverlay(v); syncProps(); }
 
